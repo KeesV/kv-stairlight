@@ -16,7 +16,8 @@
 #define MAX_BRIGHTNESS 128
 
 
-#define SENSOR_PIN 2
+#define SENSOR_UP_PIN D1
+#define SENSOR_DOWN_PIN D2
 
 const uint8_t AnimationChannels = NUM_STEPS+1; // One channel per step + 1 as overall animation coordinator
 
@@ -25,16 +26,17 @@ NeoPixelAnimator animations(AnimationChannels); // NeoPixel animation management
 NeoGamma<NeoGammaTableMethod> colorGamma; // for any fade animations, best to correct gamma
 
 
-void StairUpOnAnimUpdate(const AnimationParam& param);
-void StairUpOffAnimUpdate(const AnimationParam& param);
-void StairUpHoldAnimUpdate(const AnimationParam& param);
+void StairOnAnimUpdate(const AnimationParam& param);
+void StairOffAnimUpdate(const AnimationParam& param);
+void StairHoldAnimUpdate(const AnimationParam& param);
 void StepFadeAnimUpdate(const AnimationParam& param);
 
 struct StepAnimationState
 {
   RgbwColor StartColor;
   RgbwColor EndingColor;
-  int stepNum;
+  int8_t stepNum;
+  int8_t direction; // 1 = up, -1 = down
 };
 
 StepAnimationState animationState[AnimationChannels];
@@ -69,7 +71,7 @@ void handleRoot()
   server.send(200, "text/html", s);
 }
 
-void StartStepFadeAnimation(int stepNumber, RgbwColor startColor, RgbwColor endColor) {
+void StartStepFadeAnimation(int8_t stepNumber, RgbwColor startColor, RgbwColor endColor) {
   Serial.print("Animating step with index: ");
   Serial.println(stepNumber);
   
@@ -98,28 +100,48 @@ void StepFadeAnimUpdate(const AnimationParam& param)
 
 void StartStepUpAnimation() {
   animationState[0].stepNum = 0;
+  animationState[0].direction = 1;
   // Light the first step
   StartStepFadeAnimation(0, RgbwColor(0), RgbwColor(MAX_BRIGHTNESS));
   // And start an animation that will trigger the next steps
-  animations.StartAnimation(0, STEP_INTERVAL, StairUpOnAnimUpdate);
+  animations.StartAnimation(0, STEP_INTERVAL, StairOnAnimUpdate);
 }
 
-void StartStepUpOffAnimation() {
-  animationState[0].stepNum = 0;
+void StartStepDownAnimation() {
+  animationState[0].stepNum = NUM_STEPS - 1;
+  animationState[0].direction = -1;
   // Light the first step
-  StartStepFadeAnimation(0, RgbwColor(MAX_BRIGHTNESS), RgbwColor(0));
+  StartStepFadeAnimation(NUM_STEPS - 1, RgbwColor(0), RgbwColor(MAX_BRIGHTNESS));
   // And start an animation that will trigger the next steps
-  animations.StartAnimation(0, STEP_INTERVAL, StairUpOffAnimUpdate);
+  animations.StartAnimation(0, STEP_INTERVAL, StairOnAnimUpdate);
 }
 
-void StairUpOnAnimUpdate(const AnimationParam& param) 
+void StartStepOffAnimation() {
+  int8_t startStep;
+
+  if(animationState[0].direction == 1)
+  {
+    startStep = 0;
+  } else {
+    startStep = NUM_STEPS - 1;
+  }
+
+  animationState[0].stepNum = startStep;
+  // Light the first step
+  StartStepFadeAnimation(startStep, RgbwColor(MAX_BRIGHTNESS), RgbwColor(0));
+  // And start an animation that will trigger the next steps
+  animations.StartAnimation(0, STEP_INTERVAL, StairOffAnimUpdate);
+}
+
+void StairOnAnimUpdate(const AnimationParam& param) 
 {
   if(param.state == AnimationState_Completed)
   {
-    Serial.println("Getting ready to light the next step...");
-    int nextStep = animationState[param.index].stepNum + 1;
+    Serial.print("Getting ready to light the next step: ");
+    int nextStep = animationState[param.index].stepNum + animationState[param.index].direction;
+    Serial.println(nextStep);
     
-    if(nextStep < NUM_STEPS)
+    if(nextStep < NUM_STEPS && nextStep >= 0)
     {
       animationState[param.index].stepNum = nextStep;
       animations.RestartAnimation(param.index); // Restart this animation to reset the "timer"
@@ -127,19 +149,20 @@ void StairUpOnAnimUpdate(const AnimationParam& param)
       StartStepFadeAnimation(nextStep, RgbwColor(0), RgbwColor(MAX_BRIGHTNESS));
     } else {
       Serial.println("Lit all the steps. Holding...");
-      animations.StartAnimation(0, HOLD_TIME, StairUpHoldAnimUpdate);
+      animations.StartAnimation(0, HOLD_TIME, StairHoldAnimUpdate);
     }
   }
 }
 
-void StairUpOffAnimUpdate(const AnimationParam& param) 
+void StairOffAnimUpdate(const AnimationParam& param) 
 {
   if(param.state == AnimationState_Completed)
   {
-    Serial.println("Getting ready to dim the next step...");
-    int nextStep = animationState[param.index].stepNum + 1;
+    Serial.print("Getting ready to dim the next step: ");
+    int nextStep = animationState[param.index].stepNum + animationState[param.index].direction;
+    Serial.println(nextStep);
     
-    if(nextStep < NUM_STEPS)
+    if(nextStep < NUM_STEPS && nextStep >= 0)
     {
       animationState[param.index].stepNum = nextStep;
       animations.RestartAnimation(param.index); // Restart this animation to reset the "timer"
@@ -147,25 +170,24 @@ void StairUpOffAnimUpdate(const AnimationParam& param)
       StartStepFadeAnimation(nextStep, RgbwColor(MAX_BRIGHTNESS), RgbwColor(0));
     } else {
       Serial.println("Dimmed all the steps. Done!");
-      
     }
   }
 }
 
-void StairUpHoldAnimUpdate(const AnimationParam& param) 
+void StairHoldAnimUpdate(const AnimationParam& param) 
 {
   if(param.state == AnimationState_Completed)
   {
     Serial.println("Done holding, starting dimming!");
     
-    animationState[0].stepNum = 0;
-    StartStepUpOffAnimation();
+    StartStepOffAnimation();
   }
 }
 
 void setup()
 {
-  pinMode(SENSOR_PIN, INPUT);
+  pinMode(SENSOR_UP_PIN, INPUT);
+  pinMode(SENSOR_DOWN_PIN, INPUT);
 
   Serial.begin(115200);
   while (!Serial); // wait for serial attach
@@ -189,8 +211,6 @@ void setup()
   IPAddress ip = WiFi.softAPIP();
   Serial.print("IP address: ");
   Serial.println(ip.toString());
-
-  StartStepUpAnimation();
 }
 
 void loop()
@@ -200,6 +220,16 @@ void loop()
     animations.UpdateAnimations();
     strip.Show();
   } else {
+    // if(digitalRead(SENSOR_UP_PIN) == HIGH)
+    // {
+    //   Serial.println("Movement going up detected!");
+    //   StartStepUpAnimation();
+    // }
+    // } else if(digitalRead(SENSOR_DOWN_PIN) == HIGH)
+    // {
+    //   Serial.println("Movement going down detected!");
+    //   StartStepDownAnimation();
+    // }
     StartStepUpAnimation();
   }
   yield();
