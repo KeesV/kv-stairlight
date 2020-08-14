@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <ArduinoOTA.h>
 #include <IotWebConf.h>
 
 #include <NeoPixelBus.h>
@@ -276,6 +277,28 @@ void setup()
   Serial.println(holdTime);
   Serial.print("Max brightness: ");
   Serial.println(maxBrightness);
+
+  ArduinoOTA.onStart([]() {
+    String type;
+    if (ArduinoOTA.getCommand() == U_FLASH) {
+      type = "sketch";
+    } else { // U_FS
+      type = "filesystem";
+    }
+
+    // NOTE: if updating FS this would be the place to unmount FS using FS.end()
+    Serial.println("Start updating " + type);
+  });
+  ArduinoOTA.onEnd([]() {
+    Serial.println("\nEnd");
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+  
+  ArduinoOTA.begin();
+
+  Serial.println("Startup completed!");
 }
 
 uint32_t mLastTime = 0;
@@ -308,6 +331,8 @@ void loop()
   iotWebConf.doLoop();
   yield();
   Debug.handle();
+  yield();
+  ArduinoOTA.handle();
   yield();
 
   if(needsReset)
