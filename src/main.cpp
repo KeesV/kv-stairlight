@@ -10,10 +10,11 @@
 
 #define NUM_STEPS 10
 #define LEDS_PER_STEP 3
-#define STEP_INTERVAL 250
-#define STEP_FADE_TIME 1000
-#define HOLD_TIME 5000
-#define MAX_BRIGHTNESS 128
+
+uint16_t stepInterval;
+uint16_t stepFadeTime;
+uint16_t holdTime;
+uint8_t maxBrightness;
 
 
 #define SENSOR_UP_PIN D1
@@ -50,7 +51,34 @@ const char wifiInitialApPassword[] = "smrtTHNG8266";
 DNSServer dnsServer;
 WebServer server(80);
 
-IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword);
+#define STRING_LEN 128
+#define NUMBER_LEN 32
+
+char stepIntervalParamValue[NUMBER_LEN];
+char stepFadeTimeParamValue[NUMBER_LEN];
+char holdTimeParamValue[NUMBER_LEN];
+char maxBrightnessParamValue[NUMBER_LEN];
+
+char mqttBrokerHostParamValue[STRING_LEN];
+char mqttBrokerPortParamValue[NUMBER_LEN];
+char mqttCommandTopicBaseParamValue[STRING_LEN];
+char mqttStateTopicBaseParamValue[STRING_LEN];
+
+bool needsReset = false;
+
+#define CONFIG_VERSION "init" // key should be changed whenever config structure changes
+IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CONFIG_VERSION);
+IotWebConfSeparator animationSeparator = IotWebConfSeparator("Animation Settings");
+IotWebConfParameter stepIntervalParam = IotWebConfParameter("Step interval (ms)", "stepInterval", stepIntervalParamValue, NUMBER_LEN, "number", NULL, "250");
+IotWebConfParameter stepFadeTimeParam = IotWebConfParameter("Step fade time (ms)", "stepFadeTime", stepFadeTimeParamValue, NUMBER_LEN, "number", NULL, "1000");
+IotWebConfParameter holdTimeParam = IotWebConfParameter("Hold time (ms)", "holdTime", holdTimeParamValue, NUMBER_LEN, "number", NULL, "5000");
+IotWebConfParameter maxBrightNexxParam = IotWebConfParameter("Max brightness", "maxBrightness", maxBrightnessParamValue, NUMBER_LEN, "number", NULL, "128", "min='1' max='255' step='1'");
+
+IotWebConfSeparator mqttSeparator = IotWebConfSeparator("MQTT Settings");
+IotWebConfParameter mqttBrokerHostParam = IotWebConfParameter("Mqtt host", "mqttHost", mqttBrokerHostParamValue, STRING_LEN, "text", NULL, "home.lan");
+IotWebConfParameter mqttBrokerPortParam = IotWebConfParameter("Mqtt port", "mqttPort", mqttBrokerPortParamValue, STRING_LEN, "number", NULL, "8123");
+IotWebConfParameter mqttCommandTopicBaseParam = IotWebConfParameter("Mqtt command topic", "mqttCommandTopic", mqttCommandTopicBaseParamValue, STRING_LEN, "text", NULL, "stairlight/command");
+IotWebConfParameter mqttStateTopicBaseParam = IotWebConfParameter("Mqtt state topic", "mqttStateTopic", mqttStateTopicBaseParamValue, STRING_LEN, "text", NULL, "stairlight/state");
 
 /**
  * Handle web requests to "/" path.
@@ -64,8 +92,8 @@ void handleRoot()
     return;
   }
   String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
-  s += "<title>IotWebConf 01 Minimal</title></head><body>Hello world!";
-  s += "Go to <a href='config'>configure page</a> to change settings.";
+  s += "<title>Stairlight</title></head><body><p>Hello from under the stairs!</p>";
+  s += "<p>Go to <a href='config'>configure page</a> to change settings.</p>";
   s += "</body></html>\n";
 
   server.send(200, "text/html", s);
@@ -83,7 +111,7 @@ void StartStepFadeAnimation(int8_t stepNumber, RgbwColor startColor, RgbwColor e
       animationState[indexAnim].EndingColor = endColor;
       animationState[indexAnim].stepNum = stepNumber;
 
-      animations.StartAnimation(indexAnim, STEP_FADE_TIME, StepFadeAnimUpdate);
+      animations.StartAnimation(indexAnim, stepFadeTime, StepFadeAnimUpdate);
   }
 }
 
@@ -102,18 +130,18 @@ void StartStepUpAnimation() {
   animationState[0].stepNum = 0;
   animationState[0].direction = 1;
   // Light the first step
-  StartStepFadeAnimation(0, RgbwColor(0), RgbwColor(MAX_BRIGHTNESS));
+  StartStepFadeAnimation(0, RgbwColor(0), RgbwColor(maxBrightness));
   // And start an animation that will trigger the next steps
-  animations.StartAnimation(0, STEP_INTERVAL, StairOnAnimUpdate);
+  animations.StartAnimation(0, stepInterval, StairOnAnimUpdate);
 }
 
 void StartStepDownAnimation() {
   animationState[0].stepNum = NUM_STEPS - 1;
   animationState[0].direction = -1;
   // Light the first step
-  StartStepFadeAnimation(NUM_STEPS - 1, RgbwColor(0), RgbwColor(MAX_BRIGHTNESS));
+  StartStepFadeAnimation(NUM_STEPS - 1, RgbwColor(0), RgbwColor(maxBrightness));
   // And start an animation that will trigger the next steps
-  animations.StartAnimation(0, STEP_INTERVAL, StairOnAnimUpdate);
+  animations.StartAnimation(0, stepInterval, StairOnAnimUpdate);
 }
 
 void StartStepOffAnimation() {
@@ -128,9 +156,9 @@ void StartStepOffAnimation() {
 
   animationState[0].stepNum = startStep;
   // Light the first step
-  StartStepFadeAnimation(startStep, RgbwColor(MAX_BRIGHTNESS), RgbwColor(0));
+  StartStepFadeAnimation(startStep, RgbwColor(maxBrightness), RgbwColor(0));
   // And start an animation that will trigger the next steps
-  animations.StartAnimation(0, STEP_INTERVAL, StairOffAnimUpdate);
+  animations.StartAnimation(0, stepInterval, StairOffAnimUpdate);
 }
 
 void StairOnAnimUpdate(const AnimationParam& param) 
@@ -146,10 +174,10 @@ void StairOnAnimUpdate(const AnimationParam& param)
       animationState[param.index].stepNum = nextStep;
       animations.RestartAnimation(param.index); // Restart this animation to reset the "timer"
 
-      StartStepFadeAnimation(nextStep, RgbwColor(0), RgbwColor(MAX_BRIGHTNESS));
+      StartStepFadeAnimation(nextStep, RgbwColor(0), RgbwColor(maxBrightness));
     } else {
       Serial.println("Lit all the steps. Holding...");
-      animations.StartAnimation(0, HOLD_TIME, StairHoldAnimUpdate);
+      animations.StartAnimation(0, holdTime, StairHoldAnimUpdate);
     }
   }
 }
@@ -167,7 +195,7 @@ void StairOffAnimUpdate(const AnimationParam& param)
       animationState[param.index].stepNum = nextStep;
       animations.RestartAnimation(param.index); // Restart this animation to reset the "timer"
 
-      StartStepFadeAnimation(nextStep, RgbwColor(MAX_BRIGHTNESS), RgbwColor(0));
+      StartStepFadeAnimation(nextStep, RgbwColor(maxBrightness), RgbwColor(0));
     } else {
       Serial.println("Dimmed all the steps. Done!");
     }
@@ -184,6 +212,12 @@ void StairHoldAnimUpdate(const AnimationParam& param)
   }
 }
 
+void configSaved()
+{
+  Serial.println("Configuration was updated.");
+  needsReset = true;
+}
+
 void setup()
 {
   pinMode(SENSOR_UP_PIN, INPUT);
@@ -198,7 +232,19 @@ void setup()
   // this resets all the neopixels to an off state
   strip.Begin();
   strip.Show();
-  
+
+  iotWebConf.addParameter(&animationSeparator);
+  iotWebConf.addParameter(&stepIntervalParam);
+  iotWebConf.addParameter(&stepFadeTimeParam);
+  iotWebConf.addParameter(&holdTimeParam);
+  iotWebConf.addParameter(&maxBrightNexxParam);
+  iotWebConf.addParameter(&mqttSeparator);
+  iotWebConf.addParameter(&mqttBrokerHostParam);
+  iotWebConf.addParameter(&mqttBrokerPortParam);
+  iotWebConf.addParameter(&mqttCommandTopicBaseParam);
+  iotWebConf.addParameter(&mqttStateTopicBaseParam);
+
+  iotWebConf.setConfigSavedCallback(&configSaved);
 
   // -- Initializing the configuration.
   iotWebConf.init();
@@ -208,9 +254,19 @@ void setup()
   server.on("/config", [] { iotWebConf.handleConfig(); });
   server.onNotFound([]() { iotWebConf.handleNotFound(); });
 
-  IPAddress ip = WiFi.softAPIP();
-  Serial.print("IP address: ");
-  Serial.println(ip.toString());
+  stepInterval = atoi(stepIntervalParamValue);
+  stepFadeTime = atoi(stepFadeTimeParamValue);
+  holdTime = atoi(holdTimeParamValue);
+  maxBrightness = atoi(maxBrightnessParamValue);
+
+  Serial.print("Step interval: ");
+  Serial.println(stepInterval);
+  Serial.print("Step fade time: ");
+  Serial.println(stepFadeTime);
+  Serial.print("Hold time: ");
+  Serial.println(holdTime);
+  Serial.print("Max brightness: ");
+  Serial.println(maxBrightness);
 }
 
 void loop()
@@ -230,11 +286,16 @@ void loop()
     //   Serial.println("Movement going down detected!");
     //   StartStepDownAnimation();
     // }
-    StartStepUpAnimation();
+    //StartStepUpAnimation();
   }
   yield();
   iotWebConf.doLoop();
   yield();
+
+  if(needsReset)
+  {
+    ESP.reset();
+  }
   // if(digitalRead(SIGNAL_PIN)==HIGH) {
   //   Serial.println("Movement detected.");
   // } else {
