@@ -4,6 +4,10 @@
 #include <NeoPixelBus.h>
 #include <NeoPixelAnimator.h>
 
+#include "RemoteDebug.h"
+#include "RemoteDebugger.h"
+RemoteDebug Debug;
+
 #ifdef __AVR__
 #include <avr/power.h>
 #endif
@@ -249,6 +253,11 @@ void setup()
   // -- Initializing the configuration.
   iotWebConf.init();
 
+  Debug.begin(thingName);
+  Debug.setSerialEnabled(true);
+  Debug.showProfiler(false); // Profiler (Good to measure times, to optimize codes)
+	Debug.showColors(true); // Colors
+
   // -- Set up required URL handlers on the web server.
   server.on("/", handleRoot);
   server.on("/config", [] { iotWebConf.handleConfig(); });
@@ -269,8 +278,15 @@ void setup()
   Serial.println(maxBrightness);
 }
 
+uint32_t mLastTime = 0;
 void loop()
 {
+  if ((millis() - mLastTime) >= 1000) {
+    // Time
+    mLastTime = millis();
+    debugV("* Ploink!");
+  }
+
   if(animations.IsAnimating())
   {
     animations.UpdateAnimations();
@@ -290,6 +306,8 @@ void loop()
   }
   yield();
   iotWebConf.doLoop();
+  yield();
+  Debug.handle();
   yield();
 
   if(needsReset)
