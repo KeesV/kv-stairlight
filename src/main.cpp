@@ -2,6 +2,16 @@
 #include <ArduinoOTA.h>
 #include <IotWebConf.h>
 
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+const char *mqtt_server = "home.lan";
+const char *mqtt_user = "esp_woonkamer";
+const char *mqtt_pass = "1A1Fbi8D6gEbaPQU98XP4ERNAcZoIeYl";
+
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
+StaticJsonDocument<256> receivedJson;
+
 #include <NeoPixelBus.h>
 #include <NeoPixelAnimator.h>
 
@@ -13,29 +23,28 @@ RemoteDebug Debug;
 #include <avr/power.h>
 #endif
 
-#define NUM_STEPS 10
-#define LEDS_PER_STEP 3
+#define NUM_STEPS 16     // 16
+#define LEDS_PER_STEP 29 //29
 
 uint16_t stepInterval;
 uint16_t stepFadeTime;
 uint16_t holdTime;
 uint8_t maxBrightness;
 
-
 #define SENSOR_UP_PIN D1
 #define SENSOR_DOWN_PIN D2
 
-const uint8_t AnimationChannels = NUM_STEPS+1; // One channel per step + 1 as overall animation coordinator
+const uint8_t AnimationChannels = NUM_STEPS + 1; // One channel per step + 1 as overall animation coordinator
 
-NeoPixelBus<NeoGrbwFeature, NeoEsp8266Dma800KbpsMethod> strip(NUM_STEPS * LEDS_PER_STEP);
+// Connect NeoPixel to GPIO3 on ESP8266 = RX on Wemos D1 mini
+NeoPixelBus<NeoGrbwFeature, NeoEsp8266Dma800KbpsMethod> strip(NUM_STEPS *LEDS_PER_STEP);
 NeoPixelAnimator animations(AnimationChannels); // NeoPixel animation management object
-NeoGamma<NeoGammaTableMethod> colorGamma; // for any fade animations, best to correct gamma
+NeoGamma<NeoGammaTableMethod> colorGamma;       // for any fade animations, best to correct gamma
 
-
-void StairOnAnimUpdate(const AnimationParam& param);
-void StairOffAnimUpdate(const AnimationParam& param);
-void StairHoldAnimUpdate(const AnimationParam& param);
-void StepFadeAnimUpdate(const AnimationParam& param);
+void StairOnAnimUpdate(const AnimationParam &param);
+void StairOffAnimUpdate(const AnimationParam &param);
+void StairHoldAnimUpdate(const AnimationParam &param);
+void StepFadeAnimUpdate(const AnimationParam &param);
 
 struct StepAnimationState
 {
@@ -71,7 +80,7 @@ char mqttStateTopicBaseParamValue[STRING_LEN];
 
 bool needsReset = false;
 
-#define CONFIG_VERSION "init" // key should be changed whenever config structure changes
+#define CONFIG_VERSION "init1" // key should be changed whenever config structure changes
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CONFIG_VERSION);
 IotWebConfSeparator animationSeparator = IotWebConfSeparator("Animation Settings");
 IotWebConfParameter stepIntervalParam = IotWebConfParameter("Step interval (ms)", "stepInterval", stepIntervalParamValue, NUMBER_LEN, "number", NULL, "250");
@@ -104,34 +113,36 @@ void handleRoot()
   server.send(200, "text/html", s);
 }
 
-void StartStepFadeAnimation(int8_t stepNumber, RgbwColor startColor, RgbwColor endColor) {
-  Serial.print("Animating step with index: ");
-  Serial.println(stepNumber);
-  
+void StartStepFadeAnimation(int8_t stepNumber, RgbwColor startColor, RgbwColor endColor)
+{
+  // Serial.print("Animating step with index: ");
+  // Serial.println(stepNumber);
+
   uint16_t indexAnim;
 
   if (animations.NextAvailableAnimation(&indexAnim, 1))
   {
-      animationState[indexAnim].StartColor = startColor;
-      animationState[indexAnim].EndingColor = endColor;
-      animationState[indexAnim].stepNum = stepNumber;
+    animationState[indexAnim].StartColor = startColor;
+    animationState[indexAnim].EndingColor = endColor;
+    animationState[indexAnim].stepNum = stepNumber;
 
-      animations.StartAnimation(indexAnim, stepFadeTime, StepFadeAnimUpdate);
+    animations.StartAnimation(indexAnim, stepFadeTime, StepFadeAnimUpdate);
   }
 }
 
-void StepFadeAnimUpdate(const AnimationParam& param)
+void StepFadeAnimUpdate(const AnimationParam &param)
 {
   RgbwColor updatedColor = RgbwColor::LinearBlend(animationState[param.index].StartColor, animationState[param.index].EndingColor, param.progress);
   int startPixel = animationState[param.index].stepNum * LEDS_PER_STEP;
 
-  for(uint8_t i = 0; i < LEDS_PER_STEP; i++)
+  for (uint8_t i = 0; i < LEDS_PER_STEP; i++)
   {
     strip.SetPixelColor(startPixel + i, colorGamma.Correct(updatedColor));
   }
 }
 
-void StartStepUpAnimation() {
+void StartStepUpAnimation()
+{
   animationState[0].stepNum = 0;
   animationState[0].direction = 1;
   // Light the first step
@@ -140,7 +151,8 @@ void StartStepUpAnimation() {
   animations.StartAnimation(0, stepInterval, StairOnAnimUpdate);
 }
 
-void StartStepDownAnimation() {
+void StartStepDownAnimation()
+{
   animationState[0].stepNum = NUM_STEPS - 1;
   animationState[0].direction = -1;
   // Light the first step
@@ -149,13 +161,16 @@ void StartStepDownAnimation() {
   animations.StartAnimation(0, stepInterval, StairOnAnimUpdate);
 }
 
-void StartStepOffAnimation() {
+void StartStepOffAnimation()
+{
   int8_t startStep;
 
-  if(animationState[0].direction == 1)
+  if (animationState[0].direction == 1)
   {
     startStep = 0;
-  } else {
+  }
+  else
+  {
     startStep = NUM_STEPS - 1;
   }
 
@@ -166,53 +181,57 @@ void StartStepOffAnimation() {
   animations.StartAnimation(0, stepInterval, StairOffAnimUpdate);
 }
 
-void StairOnAnimUpdate(const AnimationParam& param) 
+void StairOnAnimUpdate(const AnimationParam &param)
 {
-  if(param.state == AnimationState_Completed)
+  if (param.state == AnimationState_Completed)
   {
-    Serial.print("Getting ready to light the next step: ");
+    //Serial.print("Getting ready to light the next step: ");
     int nextStep = animationState[param.index].stepNum + animationState[param.index].direction;
-    Serial.println(nextStep);
-    
-    if(nextStep < NUM_STEPS && nextStep >= 0)
+    //Serial.println(nextStep);
+
+    if (nextStep < NUM_STEPS && nextStep >= 0)
     {
       animationState[param.index].stepNum = nextStep;
       animations.RestartAnimation(param.index); // Restart this animation to reset the "timer"
 
       StartStepFadeAnimation(nextStep, RgbwColor(0), RgbwColor(maxBrightness));
-    } else {
+    }
+    else
+    {
       Serial.println("Lit all the steps. Holding...");
       animations.StartAnimation(0, holdTime, StairHoldAnimUpdate);
     }
   }
 }
 
-void StairOffAnimUpdate(const AnimationParam& param) 
+void StairOffAnimUpdate(const AnimationParam &param)
 {
-  if(param.state == AnimationState_Completed)
+  if (param.state == AnimationState_Completed)
   {
-    Serial.print("Getting ready to dim the next step: ");
+    //Serial.print("Getting ready to dim the next step: ");
     int nextStep = animationState[param.index].stepNum + animationState[param.index].direction;
-    Serial.println(nextStep);
-    
-    if(nextStep < NUM_STEPS && nextStep >= 0)
+    //Serial.println(nextStep);
+
+    if (nextStep < NUM_STEPS && nextStep >= 0)
     {
       animationState[param.index].stepNum = nextStep;
       animations.RestartAnimation(param.index); // Restart this animation to reset the "timer"
 
       StartStepFadeAnimation(nextStep, RgbwColor(maxBrightness), RgbwColor(0));
-    } else {
-      Serial.println("Dimmed all the steps. Done!");
+    }
+    else
+    {
+      //Serial.println("Dimmed all the steps. Done!");
     }
   }
 }
 
-void StairHoldAnimUpdate(const AnimationParam& param) 
+void StairHoldAnimUpdate(const AnimationParam &param)
 {
-  if(param.state == AnimationState_Completed)
+  if (param.state == AnimationState_Completed)
   {
     Serial.println("Done holding, starting dimming!");
-    
+
     StartStepOffAnimation();
   }
 }
@@ -223,13 +242,68 @@ void configSaved()
   needsReset = true;
 }
 
+void onMqttReceiveMessage(char *topic, byte *p_payload, unsigned int p_length)
+{
+  // concat the payload into a string
+  char payload[p_length + 1];
+  for (unsigned int i = 0; i < p_length; i++)
+  {
+    payload[i] = (char)p_payload[i];
+  }
+  payload[p_length] = '\0';
+
+  // Deserialize the JSON document
+  DeserializationError error = deserializeJson(receivedJson, payload);
+
+  // // Test if parsing succeeds.
+  if (error)
+  {
+    Serial.print(F("deserializeJson() failed: "));
+    return;
+  }
+
+  const char *state = receivedJson["state"];
+
+  if (strcmp(state, "ON") == 0 && !animations.IsAnimating())
+  {
+    mqttClient.publish("stairlight/state", "Going UP");
+
+    StartStepUpAnimation();
+  }
+}
+
+void reconnectMqtt()
+{
+  Serial.print("Attempting MQTT connection...");
+  // Create a random client ID
+  String clientId = "stairlight-";
+  clientId += String(random(0xffff), HEX);
+  // Attempt to connect
+  if (mqttClient.connect(clientId.c_str(), mqtt_user, mqtt_pass))
+  {
+    Serial.println("connected");
+    // Once connected, publish an announcement...
+    mqttClient.publish("stairlight/state", "hello world");
+    mqttClient.subscribe("stairmotion/motion");
+  }
+  else
+  {
+    Serial.print("failed, rc=");
+    Serial.print(mqttClient.state());
+    Serial.println(" try again in 5 seconds");
+    // Wait 5 seconds before retrying
+    delay(5000);
+  }
+}
+
 void setup()
 {
   pinMode(SENSOR_UP_PIN, INPUT);
   pinMode(SENSOR_DOWN_PIN, INPUT);
 
   Serial.begin(115200);
-  while (!Serial); // wait for serial attach
+  while (!Serial)
+    ; // wait for serial attach
   Serial.println();
   Serial.println("Starting up...");
   Serial.flush();
@@ -257,7 +331,7 @@ void setup()
   Debug.begin(thingName);
   Debug.setSerialEnabled(true);
   Debug.showProfiler(false); // Profiler (Good to measure times, to optimize codes)
-	Debug.showColors(true); // Colors
+  Debug.showColors(true);    // Colors
 
   // -- Set up required URL handlers on the web server.
   server.on("/", handleRoot);
@@ -280,9 +354,12 @@ void setup()
 
   ArduinoOTA.onStart([]() {
     String type;
-    if (ArduinoOTA.getCommand() == U_FLASH) {
+    if (ArduinoOTA.getCommand() == U_FLASH)
+    {
       type = "sketch";
-    } else { // U_FS
+    }
+    else
+    { // U_FS
       type = "filesystem";
     }
 
@@ -295,8 +372,11 @@ void setup()
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
     Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
   });
-  
+
   ArduinoOTA.begin();
+
+  mqttClient.setServer(mqtt_server, 1883);
+  mqttClient.setCallback(onMqttReceiveMessage);
 
   Serial.println("Startup completed!");
 }
@@ -304,29 +384,28 @@ void setup()
 uint32_t mLastTime = 0;
 void loop()
 {
-  if ((millis() - mLastTime) >= 1000) {
+  if ((millis() - mLastTime) >= 1000)
+  {
     // Time
     mLastTime = millis();
     debugV("* Ploink!");
   }
 
-  if(animations.IsAnimating())
+  if (animations.IsAnimating())
   {
     animations.UpdateAnimations();
     strip.Show();
-  } else {
-    // if(digitalRead(SENSOR_UP_PIN) == HIGH)
-    // {
-    //   Serial.println("Movement going up detected!");
-    //   StartStepUpAnimation();
-    // }
-    // } else if(digitalRead(SENSOR_DOWN_PIN) == HIGH)
-    // {
-    //   Serial.println("Movement going down detected!");
-    //   StartStepDownAnimation();
-    // }
+  }
+  else
+  {
     //StartStepUpAnimation();
   }
+
+  if (iotWebConf.getState() == IOTWEBCONF_STATE_ONLINE && !mqttClient.connected())
+  {
+    reconnectMqtt();
+  }
+
   yield();
   iotWebConf.doLoop();
   yield();
@@ -334,21 +413,11 @@ void loop()
   yield();
   ArduinoOTA.handle();
   yield();
+  mqttClient.loop();
+  yield();
 
-  if(needsReset)
+  if (needsReset)
   {
     ESP.reset();
   }
-  // if(digitalRead(SIGNAL_PIN)==HIGH) {
-  //   Serial.println("Movement detected.");
-  // } else {
-  //   Serial.println("Did not detect movement.");
-  // }
-  // delay(1000);
-  // stepManager.Handle();
-  // yield();
-  // iotWebConf.doLoop();
-  // yield();
-
-  
 }

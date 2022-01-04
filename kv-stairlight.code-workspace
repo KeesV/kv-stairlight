@@ -2,6 +2,10 @@
 	"folders": [
 		{
 			"path": "."
+		},
+		{
+			"name": "200923-201450-d1_mini_lite",
+			"path": "C:\\Users\\kverh\\Documents\\PlatformIO\\Projects\\200923-201450-d1_mini_lite"
 		}
 	],
 	"settings": {}
