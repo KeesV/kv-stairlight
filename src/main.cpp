@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <ArduinoOTA.h>
 #include <IotWebConf.h>
+#include <IotWebConfUsing.h>
 
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
@@ -82,17 +83,17 @@ bool needsReset = false;
 
 #define CONFIG_VERSION "init1" // key should be changed whenever config structure changes
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CONFIG_VERSION);
-IotWebConfSeparator animationSeparator = IotWebConfSeparator("Animation Settings");
-IotWebConfParameter stepIntervalParam = IotWebConfParameter("Step interval (ms)", "stepInterval", stepIntervalParamValue, NUMBER_LEN, "number", NULL, "250");
-IotWebConfParameter stepFadeTimeParam = IotWebConfParameter("Step fade time (ms)", "stepFadeTime", stepFadeTimeParamValue, NUMBER_LEN, "number", NULL, "1000");
-IotWebConfParameter holdTimeParam = IotWebConfParameter("Hold time (ms)", "holdTime", holdTimeParamValue, NUMBER_LEN, "number", NULL, "5000");
-IotWebConfParameter maxBrightNexxParam = IotWebConfParameter("Max brightness", "maxBrightness", maxBrightnessParamValue, NUMBER_LEN, "number", NULL, "128", "min='1' max='255' step='1'");
+iotwebconf::ParameterGroup animationGroup = iotwebconf::ParameterGroup("Animation Settings");
+iotwebconf::NumberParameter stepIntervalParam = iotwebconf::NumberParameter("Step interval (ms)", "stepInterval", stepIntervalParamValue, NUMBER_LEN, "number", NULL, "250");
+iotwebconf::NumberParameter stepFadeTimeParam = iotwebconf::NumberParameter("Step fade time (ms)", "stepFadeTime", stepFadeTimeParamValue, NUMBER_LEN, "number", NULL, "1000");
+iotwebconf::NumberParameter holdTimeParam = iotwebconf::NumberParameter("Hold time (ms)", "holdTime", holdTimeParamValue, NUMBER_LEN, "number", NULL, "5000");
+iotwebconf::NumberParameter maxBrightNexxParam = iotwebconf::NumberParameter("Max brightness", "maxBrightness", maxBrightnessParamValue, NUMBER_LEN, "number", NULL, "128", "min='1' max='255' step='1'");
 
-IotWebConfSeparator mqttSeparator = IotWebConfSeparator("MQTT Settings");
-IotWebConfParameter mqttBrokerHostParam = IotWebConfParameter("Mqtt host", "mqttHost", mqttBrokerHostParamValue, STRING_LEN, "text", NULL, "home.lan");
-IotWebConfParameter mqttBrokerPortParam = IotWebConfParameter("Mqtt port", "mqttPort", mqttBrokerPortParamValue, STRING_LEN, "number", NULL, "8123");
-IotWebConfParameter mqttCommandTopicBaseParam = IotWebConfParameter("Mqtt command topic", "mqttCommandTopic", mqttCommandTopicBaseParamValue, STRING_LEN, "text", NULL, "stairlight/command");
-IotWebConfParameter mqttStateTopicBaseParam = IotWebConfParameter("Mqtt state topic", "mqttStateTopic", mqttStateTopicBaseParamValue, STRING_LEN, "text", NULL, "stairlight/state");
+iotwebconf::ParameterGroup mqttGroup = iotwebconf::ParameterGroup("MQTT Settings");
+iotwebconf::TextParameter mqttBrokerHostParam = iotwebconf::TextParameter("Mqtt host", "mqttHost", mqttBrokerHostParamValue, STRING_LEN, "text", NULL, "home.lan");
+iotwebconf::NumberParameter mqttBrokerPortParam = iotwebconf::NumberParameter("Mqtt port", "mqttPort", mqttBrokerPortParamValue, STRING_LEN, "number", NULL, "8123");
+iotwebconf::TextParameter mqttCommandTopicBaseParam = iotwebconf::TextParameter("Mqtt command topic", "mqttCommandTopic", mqttCommandTopicBaseParamValue, STRING_LEN, "text", NULL, "stairlight/command");
+iotwebconf::TextParameter mqttStateTopicBaseParam = iotwebconf::TextParameter("Mqtt state topic", "mqttStateTopic", mqttStateTopicBaseParamValue, STRING_LEN, "text", NULL, "stairlight/state");
 
 /**
  * Handle web requests to "/" path.
@@ -312,17 +313,19 @@ void setup()
   strip.Begin();
   strip.Show();
 
-  iotWebConf.addParameter(&animationSeparator);
-  iotWebConf.addParameter(&stepIntervalParam);
-  iotWebConf.addParameter(&stepFadeTimeParam);
-  iotWebConf.addParameter(&holdTimeParam);
-  iotWebConf.addParameter(&maxBrightNexxParam);
-  iotWebConf.addParameter(&mqttSeparator);
-  iotWebConf.addParameter(&mqttBrokerHostParam);
-  iotWebConf.addParameter(&mqttBrokerPortParam);
-  iotWebConf.addParameter(&mqttCommandTopicBaseParam);
-  iotWebConf.addParameter(&mqttStateTopicBaseParam);
-
+  animationGroup.addItem(&stepIntervalParam);
+  animationGroup.addItem(&stepFadeTimeParam);
+  animationGroup.addItem(&holdTimeParam);
+  animationGroup.addItem(&maxBrightNexxParam);
+  
+  mqttGroup.addItem(&mqttBrokerHostParam);
+  mqttGroup.addItem(&mqttBrokerPortParam);
+  mqttGroup.addItem(&mqttCommandTopicBaseParam);
+  mqttGroup.addItem(&mqttStateTopicBaseParam);
+  
+  iotWebConf.addParameterGroup(&mqttGroup);
+  iotWebConf.addParameterGroup(&animationGroup);
+  
   iotWebConf.setConfigSavedCallback(&configSaved);
 
   // -- Initializing the configuration.
