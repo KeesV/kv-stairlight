@@ -1,7 +1,8 @@
 #include <Arduino.h>
 #include <ArduinoOTA.h>
 #include <IotWebConf.h>
-#include <IotWebConfUsing.h>
+#include <IotWebConfUsing.h> // This loads aliases for easier class names.
+#include <IotWebConfTParameter.h> // Necessary as maxBrightness paramater uses uint8_t so a custom Parameter is needed 
 
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
@@ -87,7 +88,15 @@ iotwebconf::ParameterGroup animationGroup = iotwebconf::ParameterGroup("Animatio
 iotwebconf::NumberParameter stepIntervalParam = iotwebconf::NumberParameter("Step interval (ms)", "stepInterval", stepIntervalParamValue, NUMBER_LEN, "number", NULL, "250");
 iotwebconf::NumberParameter stepFadeTimeParam = iotwebconf::NumberParameter("Step fade time (ms)", "stepFadeTime", stepFadeTimeParamValue, NUMBER_LEN, "number", NULL, "1000");
 iotwebconf::NumberParameter holdTimeParam = iotwebconf::NumberParameter("Hold time (ms)", "holdTime", holdTimeParamValue, NUMBER_LEN, "number", NULL, "5000");
-iotwebconf::NumberParameter maxBrightNexxParam = iotwebconf::NumberParameter("Max brightness", "maxBrightness", maxBrightnessParamValue, NUMBER_LEN, "number", NULL, "128", "min='1' max='255' step='1'");
+iotwebconf::IntTParameter<int8_t> maxBrightnessParam =
+  iotwebconf::Builder<iotwebconf::IntTParameter<int8_t>>("maxBrightnessParam").
+  label("Max brightness").
+  defaultValue(128).
+  min(1).
+  max(255).
+  step(1).
+  placeholder("min='1' max='255' step='1'").
+  build();
 
 iotwebconf::ParameterGroup mqttGroup = iotwebconf::ParameterGroup("MQTT Settings");
 iotwebconf::TextParameter mqttBrokerHostParam = iotwebconf::TextParameter("Mqtt host", "mqttHost", mqttBrokerHostParamValue, STRING_LEN, "text", NULL, "home.lan");
@@ -316,7 +325,7 @@ void setup()
   animationGroup.addItem(&stepIntervalParam);
   animationGroup.addItem(&stepFadeTimeParam);
   animationGroup.addItem(&holdTimeParam);
-  animationGroup.addItem(&maxBrightNexxParam);
+  animationGroup.addItem(&maxBrightnessParam);
   
   mqttGroup.addItem(&mqttBrokerHostParam);
   mqttGroup.addItem(&mqttBrokerPortParam);
@@ -344,7 +353,8 @@ void setup()
   stepInterval = atoi(stepIntervalParamValue);
   stepFadeTime = atoi(stepFadeTimeParamValue);
   holdTime = atoi(holdTimeParamValue);
-  maxBrightness = atoi(maxBrightnessParamValue);
+  // maxBrightness = atoi(maxBrightnessParamValue);
+  maxBrightness = maxBrightnessParam.value();
 
   Serial.print("Step interval: ");
   Serial.println(stepInterval);
@@ -404,7 +414,8 @@ void loop()
     //StartStepUpAnimation();
   }
 
-  if (iotWebConf.getState() == IOTWEBCONF_STATE_ONLINE && !mqttClient.connected())
+  if ((iotWebConf.getState() == iotwebconf::OnLine) && (!mqttClient.connected()))
+
   {
     reconnectMqtt();
   }
